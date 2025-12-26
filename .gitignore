@@ -1,0 +1,91 @@
+# ============================================================================
+# Thermostat Local Server - .gitignore
+# Prevents committing secrets, data, and temporary files
+# ============================================================================
+
+# ===== SECRETS AND CREDENTIALS =====
+# Actual config files with passwords/tokens (keep templates only)
+config/*.yaml
+!config/*.template
+*.pem
+*.ppk
+keys/
+certs/*.crt
+certs/*.key
+
+# ===== DATABASE DATA =====
+data/postgres*/
+data/postgres_cape/
+data/postgres_fram/
+data/postgres_nh/
+*.dump
+*.sql
+backups/*.dump
+backups/*.sql
+
+# ===== LOGS =====
+logs/
+*.log
+*.txt.log
+application.txt
+
+# ===== TEMPORARY FILES =====
+temp/
+Temp/
+*.tmp
+*.cache
+
+# ===== PYTHON =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+.venv/
+ENV/
+env/
+
+# ===== IDE AND EDITORS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== CONFIG BACKUPS (keep templates only) =====
+config/*.bak
+config/*_backup_*.yaml
+
+# ===== DOCKER (if generated) =====
+.docker/
+docker-compose.override.yml
+
+# ===== TEST AND DEBUG =====
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# ===== OS FILES =====
+Thumbs.db
+desktop.ini

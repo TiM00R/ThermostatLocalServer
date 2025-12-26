@@ -1,0 +1,37 @@
+# RadioThermostat CT50 Local Server - Dependencies (Stage 2)
+# Complete requirements for both Stage 1 (local) and Stage 2 (public sync)
+
+# === CORE ASYNC HTTP CLIENT ===
+aiohttp==3.10.10                 # HTTP client for thermostat polling and public server sync
+
+# === DATABASE ===  
+asyncpg==0.29.0                  # PostgreSQL async driver
+
+# === API SERVER ===
+fastapi==0.115.0                 # Modern API framework
+uvicorn[standard]==0.30.6        # ASGI server with performance optimizations
+
+# === DATA VALIDATION ===
+pydantic==2.9.2                  # Data validation and serialization
+
+# === CONFIGURATION ===
+pyyaml==6.0.2                    # YAML configuration file parsing
+
+# === DEVELOPMENT & TESTING ===
+pytest==8.3.3                   # Testing framework
+pytest-asyncio==0.24.0          # Async testing support
+httpx==0.27.2                   # Testing HTTP client for FastAPI
+requests==2.32.3                # Synchronous HTTP client for simple tests
+
+# === PRODUCTION ENHANCEMENTS ===
+structlog==24.4.0               # Structured logging for production
+python-multipart==0.0.9         # Form data parsing for API
+python-jose[cryptography]==3.3.0 # JWT token handling (for future auth)
+
+# === STAGE 2 SPECIFIC ===
+# All Stage 2 functionality uses existing packages:
+# - aiohttp for public server communication
+# - asyncpg for sync checkpoint management
+# - pyyaml for enhanced configuration
+aiohttp>=3.8.0
+pytz==2024.1

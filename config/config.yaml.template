@@ -1,0 +1,225 @@
+# RadioThermostat CT50 Server Configuration - Enhanced with Progressive Discovery
+
+# Site Information
+site:
+  site_id: "your_site_id"           # Unique identifier for this location
+  site_name: "Your Site Name"       # Human-readable name
+  timezone: "America/New_York"      # Timezone for this location
+  zip_code: "00000"                 # For weather service
+
+
+# Enhanced Network Discovery Settings
+network:
+  # === NEW PROGRESSIVE DISCOVERY OPTIONS ===
+  
+  # Enhanced discovery strategy (replaces basic discovery_method)
+  progressive_discovery:
+    enabled: true                        # Enable progressive discovery (vs old method)
+    
+    # Phase 1: Database + UDP Discovery (Fast Startup)
+    database_timeout_seconds: 3          # Timeout for testing known devices from DB
+    udp_timeout_seconds: 10              # UDP multicast discovery timeout
+    
+    # Phase 2: TCP Discovery (Background/Blocking)
+    
+    tcp_discovery:
+      enable_background_tcp_discovery: false     # Run TCP in background after startup
+      enable_periodic_tcp: false               # Run TCP during periodic discovery
+      tcp_batch_registration: true             # Register devices in batches as found
+      tcp_timeout_seconds: 3                   # Timeout per TCP device test
+      tcp_concurrent_limit: 5                  # Max concurrent TCP tests
+    
+    # Startup behavior
+    startup_max_wait_seconds: 15              # Max time to wait before starting operations
+    require_at_least_one_device: false       # Wait for at least one device before starting
+  
+  # === LEGACY OPTIONS (preserved for compatibility) ===
+  discovery_method: "progressive"        # "progressive" (new) or "udp_multicast" (old)
+  
+  # IP ranges to scan (your 10.0.60.x network only)
+  ip_ranges:
+    - "10.0.60.1-10.0.60.254"        # Your network range
+  
+  # Legacy timeouts (used by old discovery method)
+  discovery_timeout: 20      # Seconds to wait for multicast responses
+  request_timeout: 3         # HTTP request timeout per device (reduced for speed)
+  scan_interval_minutes: 30  # How often to rescan for new devices
+
+# Status Polling Settings  
+polling:
+  status_interval_seconds: 5    # CONFIGURABLE - How often to poll each thermostat
+  max_concurrent_requests: 5    # Limit concurrent requests (thermostats are single-threaded)
+  retry_attempts: 3            # Number of retries for failed requests
+  retry_delay_seconds: 2       # Delay between retries
+  error_threshold: 10          # Mark device inactive after this many failures
+
+# Weather Service Configuration
+weather:
+  enabled: true                   # Enable local weather fetching
+  api_provider: "openweathermap"  # Weather API provider
+  api_key: "YOUR_API_KEY_HERE"    # Get free API key from openweathermap.org
+  update_interval_minutes: 10     # Fetch weather every 10 minutes (API limit friendly)
+  timeout_seconds: 10             # Weather API request timeout
+  retry_attempts: 3               # Retry failed weather requests
+  fallback_temp: null             # Temperature to use if weather API fails (null = use last known)
+
+# Database Configuration - PostgreSQL in Docker
+database:
+  host: "localhost"
+  port: 5433                    # Same port for all locations (simpler!)
+  database: "thermostat_db"
+  username: "postgres"  
+  password: "postgres"
+  
+  # Data retention
+  retention_days_raw: 14        # Keep raw readings for 14 days
+  retention_days_minute: 365    # Keep minute aggregations for 1 year
+  cleanup_interval_hours: 24    # How often to run cleanup
+
+# Local API Settings (Stage 1)
+api:
+  host: "0.0.0.0"             # Listen on all interfaces
+  port: 8000                  # API server port
+  cors_origins:               # Allow web interface access
+    - "*"                     # Allow all origins (development)
+  
+  # API documentation
+  enable_docs: true           # FastAPI auto-docs at /docs
+
+# === STAGE 2: PUBLIC SERVER INTEGRATION ===
+
+# Public Server Configuration
+public_server:
+  ssl_enabled: false
+  enabled: true                         # Enable/disable public server sync
+  base_url: "http://localhost:8001"     # Public server URL Testing
+  ##base_url: "https://xx.xx.xx.xx:8001"  # Public server URL Production
+  site_token: "YOU_SITE_TOKEN"          # Authentication token
+  
+  
+  # Upload intervals
+  status_upload_seconds: 30     # Upload current status every 30s
+  minute_upload_seconds: 60     # Upload minute aggregations every 60s
+  
+  # Command polling
+  command_poll_seconds: 5       # Check for commands every 5s
+  
+  # Retry settings
+  retry_attempts: 3
+  retry_delay_seconds: 5
+  timeout_seconds: 30
+  
+  # Batch settings
+  max_batch_size: 100          # Max records per upload batch
+  
+# Command Execution Settings
+command_execution:
+  timeout_seconds: 30          # Timeout for individual command execution
+  max_retries: 2               # Retry failed commands
+  queue_max_size: 1000         # Max queued commands per device
+
+# Sync Checkpointing
+sync:
+  checkpoint_interval_seconds: 60  # How often to update checkpoints
+  backfill_days: 7                 # How far back to backfill on recovery
+  enable_recovery: true            # Auto-recover from sync failures
+
+# === END STAGE 2 ADDITIONS ===
+
+# Logging Configuration  
+logging:
+  level: "INFO"               # DEBUG, INFO, WARNING, ERROR
+  file: "logs/thermostat_server.log"
+  max_file_size_mb: 10
+  backup_count: 5
+  
+  # Console output
+  console_output: true
+  console_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Thermostat Time Synchronization
+thermostat_time_sync:
+  sync_interval_days: 7         # Weekly sync of thermostat clocks
+  sync_after_discovery: true    # Sync time immediately after discovery
+
+# Device Health Monitoring
+monitoring:
+  health_check_interval_minutes: 5
+  device_timeout_minutes: 10
+  alert_on_device_offline: false    # Stage 1: just log, no alerts
+
+# Model-Specific Capabilities (from API documentation)
+model_capabilities:
+  "CT-30":
+    auto_mode: false
+    auto_circulate_fan: false
+    program_settings_per_day: 4
+    humidity_support: false
+    dehumidifier: true
+    advanced_features: true
+    
+  "CT80 Rev A":
+    auto_mode: true
+    auto_circulate_fan: true  
+    program_settings_per_day: 7
+    humidity_support: true
+    dehumidifier: false
+    advanced_features: false
+    
+  "CT80 Rev B":  
+    auto_mode: true
+    auto_circulate_fan: true
+    program_settings_per_day: 7
+    humidity_support: true
+    dehumidifier: false
+    advanced_features: true
+    program_mode: true
+    
+  "3M50":
+    auto_mode: false
+    auto_circulate_fan: false
+    program_settings_per_day: 4
+    humidity_support: false
+    dehumidifier: false
+    advanced_features: true
+
+# Initial Device Configuration (applied after discovery)
+initial_config:
+  fan_mode: 0                   # Set fan to AUTO/OFF
+  cool_temp_safety: 80          # Set cool temp to 80°F safety value
+  time_sync_on_discovery: true  # Sync time immediately after discovery
+
+# === NEW DISCOVERY PERFORMANCE TUNING ===
+
+# Performance Settings for Enhanced Discovery
+performance:
+  # Database discovery optimization
+  db_connection_pool_size: 5           # Concurrent DB device tests
+  
+  # UDP discovery optimization  
+  udp_send_attempts: 3                 # Number of UDP broadcasts to send
+  udp_send_interval_ms: 500            # Interval between UDP broadcasts
+  
+  # TCP discovery optimization
+  tcp_batch_size_limit: 15            # Max devices per batch (per your requirement)
+  tcp_scan_chunk_size: 20             # Process IPs in chunks for progress reporting
+  tcp_gap_detection: true             # Stop scanning contiguous ranges on gaps
+  
+  # Startup optimization
+  parallel_config_application: true   # Apply initial config in parallel
+  config_timeout_seconds: 10          # Timeout for initial config per device
+
+# === MIGRATION AND COMPATIBILITY ===
+
+# Migration settings for upgrading from old discovery
+migration:
+  preserve_old_discovery: true        # Keep old discovery.py methods for fallback
+  enable_discovery_comparison: false  # Compare old vs new discovery results (debug)
+  fallback_to_old_on_failure: true    # Use old discovery if new fails
+  
+# Feature flags for gradual rollout
+feature_flags:
+  use_progressive_discovery: true     # Enable progressive discovery
+  use_enhanced_logging: true          # Enhanced discovery logging
+  use_batch_registration: true        # Batch device registration
+  use_background_tcp: true            # Background TCP discovery

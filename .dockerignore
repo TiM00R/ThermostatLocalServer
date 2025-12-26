@@ -1,0 +1,50 @@
+# .dockerignore - Prevent secrets and unnecessary files from Docker builds
+# Excludes files from COPY commands in Dockerfile
+
+# Configuration files with secrets (keep only templates)
+config/*.yaml
+!config/*.template
+
+# Database data
+data/
+backups/
+*.dump
+*.sql
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+ENV/
+env/
+
+# Development files
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Temporary files
+Temp/
+temp/
+*.tmp
+
+# Windows/Development scripts (not needed in container)
+*.ps1
+
+# Documentation (not needed in container)
+docs/
+README.md
+
+# Tests (not needed in production container)
+tests/
+
+# Certificates (mount at runtime instead)
+certs/*.crt
+certs/*.key

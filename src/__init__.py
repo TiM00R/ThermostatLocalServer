@@ -1,0 +1,1 @@
+# RadioThermostat CT50 Discovery Module
