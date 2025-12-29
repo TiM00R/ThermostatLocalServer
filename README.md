@@ -428,7 +428,13 @@ Each location uses:
 - **API Reference**: `docs/API_REFERENCE.md`
 
 ---
+## License
 
+MIT License - see [LICENSE](LICENSE) file for details
+
+You are free to use, modify, and distribute this software. See LICENSE file for full terms.
+
+---
 ## Version History
 
 - **v2.0** (Current)
