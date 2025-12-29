@@ -2,7 +2,7 @@
 # Tests connectivity to the remote public server
 
 param(
-    [string]$PublicServerIP = "YOUR_PUBLIC_IP_HERE",
+    [string]$PublicServerIP,
     [string]$Port = "8001"
 )
 

@@ -6,8 +6,21 @@ param(
   [string]$LocalUser = 'tstat'        # Local server username
 )
 
+# Load environment variables from .env file (in same directory as script)
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+$envPath = Join-Path $scriptDir ".env"
+if (Test-Path $envPath) {
+    Get-Content $envPath | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]*?)\s*=\s*(.*)$') {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            Set-Item -Path "env:$name" -Value $value
+        }
+    }
+}
+
 # --- Paths (edit if different) ---
-$PublicHost   = 'YOUR_PUBLIC_IP_HERE'
+$PublicHost   = $env:PUBLIC_SERVER_IP
 $PublicUser   = 'ubuntu'
 $PublicKeyPem = 'D:\ThermostatPublicServer\keys\LightsailDefaultKey-us-east-1.pem'   # Lightsail key for public server
 $LocalKey     = 'D:\ThermostatPublicServer\keys\local-login'                         # OpenSSH private key reused for all locals

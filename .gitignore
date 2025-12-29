@@ -4,6 +4,10 @@
 # ============================================================================
 
 # ===== SECRETS AND CREDENTIALS =====
+# Environment files with secrets
+.env
+.env.*
+
 # Actual config files with passwords/tokens (keep templates only)
 config/*.yaml
 !config/*.template

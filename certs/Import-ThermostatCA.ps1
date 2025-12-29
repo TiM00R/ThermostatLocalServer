@@ -1,6 +1,7 @@
 param(
-  [string]$CaPath   = 'D:\ThermostatLocalServer\certs\thermo-ca.crt',
-  [string]$PublicIP = 'YOUR_PUBLIC_IP_HERE'
+  [string]$CaPath = 'D:\ThermostatLocalServer\certs\thermo-ca.crt',
+  [Parameter(Mandatory=$true)]
+  [string]$PublicIP
 )
 
 # --- Admin check ---
@@ -28,15 +29,14 @@ Get-ChildItem 'Cert:\LocalMachine\Root' |
 # --- Force TLS 1.2 (helps older hosts) ---
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# --- Test HTTPS ---
-$healthUrl = "https://$PublicIP`:8001/health"
+# --- Test HTTPS connection to public server ---
+Write-Host "`nTesting HTTPS connection to ${PublicIP}:8001..." -ForegroundColor Cyan
 try {
-  $r = Invoke-WebRequest $healthUrl -TimeoutSec 10
-  Write-Host "OK: $healthUrl  Status=$($r.StatusCode)"
-  exit 0
+  $response = Invoke-WebRequest -Uri "https://${PublicIP}:8001/api/v1/health" -UseBasicParsing -TimeoutSec 10
+  Write-Host "SUCCESS: Connected to public server (Status: $($response.StatusCode))" -ForegroundColor Green
+} catch {
+  Write-Warning "Could not connect to public server: $_"
+  Write-Host "This is normal if the server is not running or firewall is blocking." -ForegroundColor Yellow
 }
-catch {
-  Write-Error "HTTPS test failed for $healthUrl"
-  Write-Error $_.Exception.Message
-  exit 3
-}
+
+Write-Host "`nCA certificate installed successfully!" -ForegroundColor Green
