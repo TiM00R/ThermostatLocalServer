@@ -16,6 +16,17 @@
    - [Sync Monitoring Endpoints](#sync-monitoring-endpoints)
    - [Discovery Endpoints](#discovery-endpoints)
 2. [Public Server API (Outbound)](#public-server-api-outbound)
+   - [Overview](#overview)
+   - [Authentication](#authentication)
+   - [Register Thermostats](#register-thermostats)
+   - [Upload Status Data](#upload-status-data)
+   - [Upload Minute History](#upload-minute-history)
+   - [Poll Commands](#poll-commands)
+   - [Submit Command Results](#submit-command-results)
+   - [Submit Discovery Progress](#submit-discovery-progress)
+   - [Error Handling](#public-error-handling)
+   - [Testing Public Server API](#testing)
+   - [Communication Flow](#communication-flow-diagram)
 3. [RadioThermostat Device API](#radiothermostat-device-api)
 4. [Response Codes](#response-codes)
 5. [Error Handling](#error-handling)
@@ -672,89 +683,144 @@ curl -X POST http://localhost:8000/api/discovery/scan | jq .
 
 ## Public Server API (Outbound)
 
-**Base URL**: Configured in `config.yaml` (`public_server.base_url`)
+**ThermostatLocalServer → ThermostatPublicServer Communication**
 
-**Authentication**: Header-based
+**Version**: 2.0  
+**Last Updated**: December 29, 2024  
+**Verified Against**: ThermostatPublicServer source code and live testing
+
+### Overview
+
+**Base URL**: Configured in local server `config.yaml`
+```yaml
+public_server:
+  base_url: "https://your-server.com:8001"
+  site_token: "your_site_token"
+```
+
+**Protocol**: HTTPS (SSL/TLS recommended for production)
+
+**Retry Logic**: All requests include automatic retry (default: 3 attempts) with exponential backoff
+
+---
+
+### Authentication
+
+All requests use **Site Token Authentication** via header:
+
+```http
+X-Site-Token: {your_site_token}
+Content-Type: application/json
+```
+
+The site token is configured in the public server's `config.yaml` and must match for authentication to succeed.
+
+---
+
+### Register Thermostats
+
+**Purpose:** Register newly discovered thermostats with the public server
+
+**Endpoint:**
+```http
+POST /api/v1/sites/{site_id}/thermostats/register
+```
+
+**Headers:**
 ```http
 X-Site-Token: {site_token}
 Content-Type: application/json
 ```
 
-**SSL/TLS**: Configurable (HTTPS recommended)
-
-All requests include retry logic (default: 3 attempts) with exponential backoff.
-
-### Register Thermostats
-
-```http
-POST /api/v1/sites/{site_id}/thermostats/register
-X-Site-Token: {token}
-Content-Type: application/json
-```
-
-**Description**: Register discovered thermostats with public server.
-
-**Request Body**:
+**Request Body:**
 ```json
 {
   "site_id": "cape_home",
   "thermostats": [
     {
-      "thermostat_id": "5CDAD4123456",
+      "thermostat_id": "2002af72cd92",
       "name": "Living Room",
-      "model": "CT50",
+      "model": "CT50 V1.94",
       "ip_address": "10.0.60.1",
-      "api_version": 1,
-      "fw_version": "1.94",
-      "capabilities": {},
-      "discovery_method": "udp_multicast",
+      "api_version": 113,
+      "fw_version": "1.04.84",
+      "discovery_method": "udp",
+      "capabilities": {
+        "heating": true,
+        "cooling": true,
+        "fan": true
+      },
       "away_temp": 50.0
     }
   ]
 }
 ```
 
-**Response**: 200 OK
+**Request Fields:**
+- `site_id` - Site identifier (must match URL)
+- `thermostats[]` - Array of thermostat objects
+  - `thermostat_id` - Unique device identifier (MAC address)
+  - `name` - User-friendly name
+  - `model` - Device model (e.g., "CT50 V1.94")
+  - `ip_address` - Local IP address
+  - `api_version` - Device API version
+  - `fw_version` - Firmware version
+  - `discovery_method` - How device was found ("udp", "tcp", "database")
+  - `capabilities` - Device capabilities object
+  - `away_temp` - Away mode temperature setting
+
+**Response:** `200 OK`
 ```json
 {
-  "registered": 1,
-  "updated": 0,
-  "errors": []
+  "success": true,
+  "message": "Registered 1 thermostats (0 skipped)",
+  "data": {
+    "registered_count": 1,
+    "skipped_count": 0
+  }
 }
 ```
 
-**Triggered**: 
+**Triggered:**
 - After discovery completes
-- When new devices found
+- When new devices are found
+- On initial startup
 
 ---
 
-### Upload Status
+### Upload Status Data
 
+**Purpose:** Upload current thermostat status (real-time monitoring)
+
+**Endpoint:**
 ```http
 POST /api/v1/sites/{site_id}/status
-X-Site-Token: {token}
+```
+
+**Headers:**
+```http
+X-Site-Token: {site_token}
 Content-Type: application/json
 ```
 
-**Description**: Upload current thermostat status.
-
-**Request Body**:
+**Request Body:**
 ```json
 {
   "site_id": "cape_home",
-  "timestamp": "2024-12-25T10:30:00.000Z",
+  "timestamp": "2024-12-29T15:30:00.000Z",
   "thermostats": [
     {
-      "thermostat_id": "5CDAD4123456",
-      "ip_address": "10.0.60.1",
+      "thermostat_id": "2002af72cd92",
       "temp": 68.5,
       "t_heat": 70.0,
       "tmode": 1,
       "tstate": 0,
+      "fmode": 0,
+      "fstate": 0,
+      "override": false,
       "hold": 0,
-      "override": 0,
       "local_temp": 32.5,
+      "ip_address": "10.0.60.1",
       "last_poll_success": true,
       "last_error": null
     }
@@ -762,44 +828,78 @@ Content-Type: application/json
 }
 ```
 
-**Response**: 200 OK
+**Request Fields:**
+- `site_id` - Site identifier
+- `timestamp` - ISO 8601 timestamp (UTC)
+- `thermostats[]` - Array of status objects
+  - `thermostat_id` - Device identifier
+  - `temp` - Current temperature (°F)
+  - `t_heat` - Heat setpoint (°F)
+  - `tmode` - Operating mode (0=OFF, 1=HEAT, 2=COOL, 3=AUTO)
+  - `tstate` - HVAC state (0=OFF, 1=HEATING, 2=COOLING)
+  - `fmode` - Fan mode (0=AUTO, 1=AUTO/CIRCULATE, 2=ON)
+  - `fstate` - Fan state (0=OFF, 1=ON)
+  - `override` - Schedule override active (boolean)
+  - `hold` - Hold mode (0=OFF, 1=ON)
+  - `local_temp` - Outside temperature (°F)
+  - `ip_address` - Device IP address
+  - `last_poll_success` - Whether last poll succeeded (boolean)
+  - `last_error` - Error message if poll failed (string or null)
+
+**Response:** `200 OK`
 ```json
 {
-  "received": 1,
-  "processed": 1
+  "success": true,
+  "message": "Status updated for 1 thermostats",
+  "data": {
+    "received_count": 1,
+    "updated_count": 1
+  }
 }
 ```
 
-**Triggered**:
-- Every 30 seconds (periodic)
+**Triggered:**
+- Every 30 seconds (periodic polling)
 - Immediately on state change detection
 - Batched for multiple thermostats
 
+**Notes:**
+- Public server converts `tmode` (int) → `mode` (string)
+- Public server converts `tstate` (int) → `hvac_state` (string)
+- Public server converts `hold` (int) → `hold_status` (boolean)
+- Updates `status_cache` table
+- Broadcasts to WebSocket clients in real-time
+
 ---
 
-### Upload Minute Aggregations
+### Upload Minute History
 
+**Purpose:** Upload minute-level aggregated data for historical analysis
+
+**Endpoint:**
 ```http
 POST /api/v1/sites/{site_id}/minute
-X-Site-Token: {token}
+```
+
+**Headers:**
+```http
+X-Site-Token: {site_token}
 Content-Type: application/json
 ```
 
-**Description**: Upload minute-level aggregated data.
-
-**Request Body**:
+**Request Body:**
 ```json
 {
   "site_id": "cape_home",
-  "readings": [
+  "minute_readings": [
     {
-      "thermostat_id": "5CDAD4123456",
-      "minute_ts": "2024-12-25T10:30:00.000Z",
-      "temp_avg": 68.5,
+      "thermostat_id": "2002af72cd92",
+      "minute_ts": "2024-12-29T15:30:00.000Z",
+      "temp_avg": 68.3,
       "t_heat_last": 70.0,
       "tmode_last": 1,
       "hvac_runtime_percent": 35.2,
-      "poll_count": 12,
+      "poll_count": 2,
       "poll_failures": 0,
       "local_temp_avg": 32.5
     }
@@ -807,213 +907,521 @@ Content-Type: application/json
 }
 ```
 
-**Fields**:
-- `minute_ts`: Minute timestamp (start of minute)
-- `temp_avg`: Average temperature over the minute
-- `t_heat_last`: Last setpoint in the minute
-- `tmode_last`: Last mode in the minute
-- `hvac_runtime_percent`: Percentage of time HVAC was active (0-100)
-- `poll_count`: Number of successful polls in the minute
-- `poll_failures`: Number of failed polls
-- `local_temp_avg`: Average outside temperature
+**Request Fields:**
+- `site_id` - Site identifier
+- `minute_readings[]` - Array of minute aggregation objects
+  - `thermostat_id` - Device identifier
+  - `minute_ts` - Minute timestamp (start of minute, ISO 8601 UTC)
+  - `temp_avg` - Average temperature over the minute (°F)
+  - `t_heat_last` - Last setpoint value in the minute (°F)
+  - `tmode_last` - Last operating mode in the minute (0/1/2/3)
+  - `hvac_runtime_percent` - Percentage of minute HVAC was active (0.0-100.0)
+  - `poll_count` - Number of successful polls during minute
+  - `poll_failures` - Number of failed polls during minute
+  - `local_temp_avg` - Average outside temperature (°F)
 
-**Response**: 200 OK
+**Response:** `200 OK`
 ```json
 {
-  "received": 1,
-  "processed": 1
+  "success": true,
+  "message": "Minute data processed: 1 records",
+  "data": {
+    "received_count": 1,
+    "inserted_count": 1,
+    "average_runtime_percent": 35.2,
+    "active_records": 1
+  }
 }
 ```
 
-**Triggered**:
+**Triggered:**
 - Every 60 seconds
 - Batched (up to 100 readings per request)
+
+**Notes:**
+- ⚠️ **IMPORTANT:** Field name is `minute_readings`, not `readings`
+- Public server converts `t_heat_last` → `setpoint_last`
+- Public server converts `tmode_last` (int) → `mode_last` (string)
+- Inserts into `minute_history` table (idempotent upsert)
+- Updates runtime state for fast queries
 
 ---
 
 ### Poll Commands
 
+**Purpose:** Poll for pending commands from public server
+
+**Endpoint:**
 ```http
 GET /api/v1/sites/{site_id}/commands/pending
-X-Site-Token: {token}
 ```
 
-**Description**: Poll for pending commands from public server.
+**Headers:**
+```http
+X-Site-Token: {site_token}
+```
 
-**Response**: 200 OK
+**Response:** `200 OK` (with commands)
 ```json
 {
   "commands": [
     {
-      "cmd_id": "cmd-123456",
+      "cmd_id": "5a77730d-dacb-43cc-8077-56cb5e42945f",
+      "thermostat_id": "2002af72cd92",
       "command": "set_state",
-      "thermostat_id": "5CDAD4123456",
       "params": {
         "tmode": 1,
-        "t_heat": 72.0,
-        "hold": 1
+        "hold": 0,
+        "t_heat": 72.0
       },
-      "timeout_seconds": 30
+      "created_at": "2024-12-29T15:30:00.000Z",
+      "timeout_seconds": 300
     }
   ]
 }
 ```
 
-**Response**: 200 OK (no pending commands)
+**Response:** `200 OK` (no commands)
 ```json
 {
   "commands": []
 }
 ```
 
-**Command Types**:
+**Response Fields:**
+- `commands[]` - Array of command objects
+  - `cmd_id` - Unique command identifier (UUID)
+  - `thermostat_id` - Target device identifier (or null for site-wide)
+  - `command` - Command type (see below)
+  - `params` - Command-specific parameters (object)
+  - `created_at` - Command creation timestamp (ISO 8601)
+  - `timeout_seconds` - Execution timeout
 
-1. **set_state**: Set thermostat state
+**Supported Commands:**
+
+1. **set_state** - Set thermostat state
    ```json
    {
-     "cmd_id": "...",
      "command": "set_state",
-     "thermostat_id": "...",
      "params": {
        "tmode": 1,
-       "t_heat": 72.0,
-       "hold": 1
+       "hold": 0,
+       "t_heat": 72.0
      }
    }
    ```
+   - `tmode`: 0 (OFF) or 1 (HEAT)
+   - `hold`: 0 (OFF) or 1 (ON)
+   - `t_heat`: Temperature setpoint (required when tmode=1, omit when tmode=0)
 
-2. **set_away_temp**: Set away temperature
+2. **set_away_temp** - Set away temperature
    ```json
    {
-     "cmd_id": "...",
      "command": "set_away_temp",
-     "thermostat_id": "...",
      "params": {
        "away_temp": 50.0
      }
    }
    ```
+   - `away_temp`: Away mode temperature (41.0-76.0°F)
 
-3. **discover_devices**: Trigger discovery
+3. **discover_devices** - Trigger device discovery
    ```json
    {
-     "cmd_id": "...",
      "command": "discover_devices",
      "params": {
-       "discovery_type": "full"
+       "phases_to_run": ["database", "udp_discovery", "tcp_discovery"],
+       "apply_initial_config": true,
+       "progress_updates": true
      }
    }
    ```
 
-**Triggered**: Every 10 seconds
+**Triggered:**
+- Every 10 seconds (automatic polling)
+
+**Notes:**
+- Commands are marked as "pending" in database
+- After retrieval, local server should execute and report results
 
 ---
 
-### Send Command Results
+### Submit Command Results
 
+**Purpose:** Send command execution acknowledgments back to public server
+
+**Endpoint:**
 ```http
 POST /api/v1/sites/{site_id}/commands/results
-X-Site-Token: {token}
+```
+
+**Headers:**
+```http
+X-Site-Token: {site_token}
 Content-Type: application/json
 ```
 
-**Description**: Send command execution acknowledgments.
-
-**Request Body**:
+**Request Body:**
 ```json
 {
   "site_id": "cape_home",
   "results": [
     {
-      "cmd_id": "cmd-123456",
+      "cmd_id": "5a77730d-dacb-43cc-8077-56cb5e42945f",
       "success": true,
-      "executed_at": "2024-12-25T10:30:00.000Z",
+      "executed_at": "2024-12-29T15:30:15.000Z",
       "error_message": null,
       "response_data": {
-        "thermostats": [
-          {
-            "thermostat_id": "5CDAD4123456",
-            "success": true,
-            "response": {"success": 0}
-          }
-        ]
+        "tmode": 1,
+        "t_heat": 72.0,
+        "hold": 0
       }
     }
   ]
 }
 ```
 
-**Response**: 200 OK
+**Request Fields:**
+- `site_id` - Site identifier
+- `results[]` - Array of result objects
+  - `cmd_id` - Command identifier (from pending commands)
+  - `success` - Whether command succeeded (boolean)
+  - `executed_at` - Execution timestamp (ISO 8601 UTC)
+  - `error_message` - Error description if failed (string or null)
+  - `response_data` - Response from device (object, optional)
+
+**Response:** `200 OK`
 ```json
 {
-  "processed": 1
+  "success": true,
+  "message": "Processed 1 command results",
+  "data": {
+    "received_count": 1,
+    "processed_count": 1
+  }
 }
 ```
 
-**Triggered**: Every 2 seconds (batched)
+**Triggered:**
+- Immediately after command execution
+- Batched (every 2 seconds for multiple results)
+
+**Notes:**
+- Updates command status in database
+- Sets `acknowledged_at` timestamp
+- Logs security events for audit trail
 
 ---
 
-### Send Discovery Progress
+### Submit Discovery Progress
 
+**Purpose:** Send real-time discovery progress updates to public server
+
+**Endpoint:**
 ```http
 POST /api/v1/sites/{site_id}/commands/progress
-X-Site-Token: {token}
+```
+
+**Headers:**
+```http
+X-Site-Token: {site_token}
 Content-Type: application/json
 ```
 
-**Description**: Send real-time discovery progress updates (Protocol v2.0).
-
-**Request Body**:
+**Request Body:**
 ```json
 {
-  "command_id": "cmd-789012",
+  "command_id": "discovery-5a77730d-dacb-43cc-8077-56cb5e42945f",
   "site_id": "cape_home",
-  "status": "inprogress",
-  "execution_time_seconds": 15.3,
+  "status": "in_progress",
   "phase_history": [
     {
       "phase": "database",
       "status": "completed",
-      "start_time": "2024-12-25T10:30:00.000Z",
-      "elapsed_time": 2.1,
-      "devices_found": 3,
-      "current_action": "Testing known devices"
+      "elapsed_time": 2.5,
+      "device_ids": ["2002af72cd92", "2002af7368bb"],
+      "devices_found": 2,
+      "current_action": "Loaded 2 devices from database",
+      "ips_scanned": null,
+      "ips_to_scan": null
     },
     {
-      "phase": "udp",
-      "status": "inprogress",
-      "start_time": "2024-12-25T10:30:02.123Z",
-      "elapsed_time": 13.2,
-      "devices_found": 2,
-      "current_action": "Waiting for UDP responses"
+      "phase": "udp_discovery",
+      "status": "in_progress",
+      "elapsed_time": 8.2,
+      "device_ids": [],
+      "devices_found": 0,
+      "current_action": "Listening for UDP broadcasts...",
+      "ips_scanned": null,
+      "ips_to_scan": null
     }
   ]
 }
 ```
 
-**Status Values**:
-- `pending`: Discovery queued
-- `inprogress`: Discovery running
-- `completed`: Discovery finished successfully
-- `failed`: Discovery failed
+**Request Fields:**
+- `command_id` - Discovery command identifier
+- `site_id` - Site identifier
+- `status` - Overall discovery status (see below)
+- `phase_history[]` - Array of phase objects (in execution order)
+  - `phase` - Phase name (see below)
+  - `status` - Phase status ("pending", "in_progress", "completed", "failed")
+  - `elapsed_time` - Phase execution time in seconds
+  - `device_ids` - Devices found in this phase (array)
+  - `devices_found` - Count of devices found
+  - `current_action` - Human-readable status message
+  - `ips_scanned` - For TCP phase, IPs already scanned (optional)
+  - `ips_to_scan` - For TCP phase, total IPs to scan (optional)
 
-**Phase Values**:
-- `database`: Testing known devices from DB
-- `udp`: UDP multicast discovery
-- `tcp`: TCP IP range scanning
+**Status Values:**
+- `pending` - Discovery queued but not started
+- `in_progress` - Discovery is running
+- `completed` - Discovery finished successfully
+- `failed` - Discovery failed with error
 
-**Response**: 200 OK
+**Phase Values:**
+- `database` - Testing known devices from database
+- `udp_discovery` - UDP multicast discovery
+- `tcp_discovery` - TCP IP range scanning
+
+**Response:** `200 OK`
 ```json
 {
-  "received": true
+  "success": true,
+  "message": "Progress updated successfully",
+  "data": null
 }
 ```
 
-**Triggered**: 
-- At start of each phase
-- During phase progress
-- At completion
+**Triggered:**
+- At start of each discovery phase
+- During phase progress (especially for long TCP scans)
+- At completion of each phase
+- On discovery completion or failure
+
+**Notes:**
+- ⚠️ **IMPORTANT:** Status value is `in_progress` (with underscore), not `inprogress`
+- Public server adds `known_device_ids` from database
+- Progress is stored in memory (not in database)
+- Broadcasts to WebSocket clients for real-time UI updates
+- Available via polling endpoints for web dashboard
+
+---
+
+### Public Error Handling
+
+#### HTTP Status Codes
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 200 | OK | Request successful |
+| 400 | Bad Request | Invalid request data or site_id mismatch |
+| 401 | Unauthorized | Invalid or missing X-Site-Token |
+| 404 | Not Found | Site not found |
+| 500 | Internal Server Error | Server error |
+
+#### Error Response Format
+
+```json
+{
+  "detail": "Error description"
+}
+```
+
+#### Common Errors
+
+**Invalid Site Token:**
+```json
+{
+  "detail": "Invalid site token",
+  "status_code": 401
+}
+```
+
+**Site ID Mismatch:**
+```json
+{
+  "detail": "Site ID in URL does not match request data",
+  "status_code": 400
+}
+```
+
+**Validation Error:**
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "minute_readings"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+
+#### Retry Strategy
+
+Local servers should implement retry logic with exponential backoff:
+
+1. **First attempt:** Immediate
+2. **Second attempt:** Wait 1 second
+3. **Third attempt:** Wait 2 seconds
+4. **After 3 failures:** Log error and continue
+
+**Do not retry on:**
+- 400 Bad Request (fix the request data)
+- 401 Unauthorized (check site token)
+
+---
+
+### Testing
+
+#### PowerShell Test Example
+
+```powershell
+# Configuration
+$PUBLIC_SERVER = "https://${PUBLIC_SERVER_IP}:8001"
+$SITE_ID = "cape_home"
+$SITE_TOKEN = "your_site_token"
+
+# Headers
+$headers = @{
+    "X-Site-Token" = $SITE_TOKEN
+    "Content-Type" = "application/json"
+}
+
+# Test Status Upload
+$statusData = @{
+    site_id = $SITE_ID
+    timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    thermostats = @(
+        @{
+            thermostat_id = "2002af72cd92"
+            temp = 68.5
+            t_heat = 70.0
+            tmode = 1
+            tstate = 0
+            fmode = 0
+            fstate = 0
+            override = $false
+            hold = 0
+            local_temp = 32.0
+            ip_address = "10.0.60.5"
+            last_poll_success = $true
+            last_error = $null
+        }
+    )
+} | ConvertTo-Json -Depth 10
+
+try {
+    $response = Invoke-RestMethod -Uri "$PUBLIC_SERVER/api/v1/sites/$SITE_ID/status" `
+        -Method Post -Headers $headers -Body $statusData
+    Write-Host "Success:" -ForegroundColor Green
+    $response | ConvertTo-Json
+} catch {
+    Write-Host "Error:" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+}
+```
+
+---
+
+### Communication Flow Diagram
+
+```
+┌─────────────────┐                    ┌──────────────────┐
+│  Local Server   │                    │  Public Server   │
+│  (cape_home)    │                    │  (AWS Cloud)     │
+└────────┬────────┘                    └────────┬─────────┘
+         │                                      │
+         │ 1. Register Thermostats              │
+         │ POST /thermostats/register           │
+         ├─────────────────────────────────────>│
+         │                                      │ Store in DB
+         │<─────────────────────────────────────┤
+         │ {"registered_count": 4}              │
+         │                                      │
+         │ 2. Upload Status (every 30s)         │
+         │ POST /status                         │
+         ├─────────────────────────────────────>│
+         │                                      │ Update cache
+         │                                      │ Broadcast WS
+         │<─────────────────────────────────────┤
+         │ {"updated_count": 4}                 │
+         │                                      │
+         │ 3. Upload Minute (every 60s)         │
+         │ POST /minute                         │
+         ├─────────────────────────────────────>│
+         │                                      │ Insert history
+         │                                      │ Update runtime
+         │<─────────────────────────────────────┤
+         │ {"inserted_count": 4}                │
+         │                                      │
+         │ 4. Poll Commands (every 10s)         │
+         │ GET /commands/pending                │
+         ├─────────────────────────────────────>│
+         │<─────────────────────────────────────┤ Check DB
+         │ {"commands": [...]}                  │
+         │                                      │
+         │ 5. Execute Command                   │
+         │ (to thermostat device)               │
+         │                                      │
+         │ 6. Report Result                     │
+         │ POST /commands/results               │
+         ├─────────────────────────────────────>│
+         │                                      │ Update DB
+         │<─────────────────────────────────────┤ Broadcast WS
+         │ {"processed_count": 1}               │
+         │                                      │
+         │ 7. Discovery Progress (optional)     │
+         │ POST /commands/progress              │
+         ├─────────────────────────────────────>│
+         │                                      │ Store memory
+         │                                      │ Broadcast WS
+         │<─────────────────────────────────────┤
+         │ {"success": true}                    │
+         │                                      │
+```
+
+### Timing and Frequency
+
+| Operation | Frequency | Notes |
+|-----------|-----------|-------|
+| Register Thermostats | On discovery | Only when new devices found |
+| Upload Status | Every 30 seconds | Real-time monitoring |
+| Upload Minute History | Every 60 seconds | Historical data |
+| Poll Commands | Every 10 seconds | Command retrieval |
+| Submit Command Results | Immediate | After execution |
+| Submit Discovery Progress | During discovery | Real-time updates |
+
+### Notes for Developers
+
+1. **Field Names Matter:**
+   - Use `minute_readings` (not `readings`) for minute uploads
+   - Use `in_progress` (not `inprogress`) for discovery status
+
+2. **Response Structure:**
+   - All responses use `ApiResponse` format with `success`, `message`, and `data`
+   - Access data via `response.data.field_name`
+
+3. **Authentication:**
+   - Site token must match public server configuration
+   - Token is sent in `X-Site-Token` header (not `Authorization`)
+
+4. **Timestamps:**
+   - Always use ISO 8601 format
+   - Always use UTC timezone
+   - Format: `YYYY-MM-DDTHH:mm:ss.sssZ`
+
+5. **Batching:**
+   - Status uploads can batch multiple thermostats
+   - Minute uploads can batch up to 100 readings
+   - Command results can be batched
+
+6. **Error Handling:**
+   - Implement retry logic with exponential backoff
+   - Don't retry 400/401 errors
+   - Log all errors for debugging
 
 ---
 
@@ -1153,7 +1561,9 @@ Content-Type: application/json
 **Public Server API**:
 - `200 OK`: Request successful
 - `201 Created`: Resource created
-- `404 Not Found`: No pending commands
+- `400 Bad Request`: Invalid request data or site_id mismatch
+- `401 Unauthorized`: Invalid or missing X-Site-Token
+- `404 Not Found`: Site not found / No pending commands
 - `422 Unprocessable Entity`: Validation error
 - `429 Too Many Requests`: Rate limited
 - `500 Internal Server Error`: Server error
@@ -1223,7 +1633,7 @@ RadioThermostat API uses `success` field in response:
 
 **Public Server API**: 
 - Automatic retry: 3 attempts
-- Delay: 2 seconds (exponential backoff)
+- Delay: Exponential backoff (1s, 2s)
 - Rate limiting: Backs off on 429 errors
 
 **Device API**:
@@ -1254,5 +1664,6 @@ curl -s http://localhost:8000/openapi.json | jq -r '.paths | keys[]'
 
 ---
 
-*API Reference v2.1.0 - Verified against actual implementation (December 2024)*
-*No hallucinated endpoints - all endpoints tested and confirmed*
+*API Reference v2.1.0 - Updated December 29, 2024*  
+*Local API verified against implementation*  
+*Public Server API verified against ThermostatPublicServer v2.0*
